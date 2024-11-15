@@ -1,0 +1,9 @@
+"playerName","Node1Freq","NodeAFreq","NodeBFreq","NodeIFreq","NodeCFreq","NodeDFreq","Node2Freq","Node3Freq","Node4Freq","NodeEFreq","successFreq","failedFreq"
+"JG1 UX1",11,19,3,10,0,0,0,0,0,0,1,1
+"JG2 UX2",19,8,13,24,8,4,0,0,0,0,1,3
+"JG3 UX3",10,7,7,11,0,0,1,13,2,0,1,2
+"JG4 UX4",2,4,1,10,0,0,0,0,0,0,0,1
+"JG6 UX6",0,1,12,2,0,0,8,11,1,0,1,0
+"JG7 UX7",0,4,3,4,0,0,0,0,0,0,0,0
+"JG8 UX8",0,2,12,6,5,3,7,0,5,8,1,1
+"JG9 UX9",0,0,4,1,7,3,4,4,1,1,1,0
