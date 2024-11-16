@@ -1,943 +1,885 @@
-# 1st embedded score: 3.1 time to argue
+# Load required libraries
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(mongolite)
 
-## argument success and failure
-### argument success
-filedTestTwoNew=read.csv("fieldTestTwoTable.csv",stringsAsFactors = FALSE)[,-1]
-str(filedTestTwoNew)
-
-argumentSuccess=filedTestTwoNew %>% filter(type=="ArgumentationSuccessEvent")
-
-argumentSuccessDetail=c()
-for(i in 1:nrow(argumentSuccess)){
-  temp=mhsEventDetailsById(conn, argumentSuccess$ItemID[i])
+# Fetch and save the table directly extract from the server
+Returntidywholetablebyname <- function(connect, playerNamelist) {
+  Wholegeneraltable <- list()  # Use a list for efficient row-binding
   
-  attemptTime=temp$eventDescription$argument$attempt
-  argumentName=temp$eventDescription$argument$name
-  argumentTitle=temp$eventDescription$argument$title
-  feedbackGot=temp$eventDescription$feedback
-  if(is.null(feedbackGot)){
-    feedbackGot=" "
-  }else{
-    feedbackGot=feedbackGot
+  for (playerName in playerNamelist) {
+    # Retrieve data for the player
+    InitialPlayer <- mhsEventsForPlayerNamed(connect, playerName)
+    colnames(InitialPlayer)[1] <- "ItemID"
+    
+    # Process scene names
+    ScenenameC <- sapply(InitialPlayer$sceneNames, function(temp) paste(temp, collapse = ","))
+    ScenenameCF <- data.frame(Scenenames = unique(ScenenameC))
+    
+    # Extract player and camera positions
+    PlayerpostionX <- InitialPlayer$playerPosition$x
+    PlayerpostionZ <- InitialPlayer$playerPosition$z
+    PlayerpostionY <- InitialPlayer$playerPosition$y
+    CamerarotationX <- InitialPlayer$cameraDirection$x
+    CamerarotationZ <- InitialPlayer$cameraDirection$z
+    CamerarotationY <- InitialPlayer$cameraDirection$y
+    
+    # Process quest and task data
+    if (nrow(ScenenameCF) == 1) {
+      QuestTableF <- data.frame(QuestTableF = rep("NA", nrow(InitialPlayer)))
+      TasktableF <- data.frame(TasktableF = rep("NA", nrow(InitialPlayer)))
+    } else {
+      # Process quests
+      QuestTable <- sapply(InitialPlayer$quests, function(temp) paste(temp, collapse = ","))
+      QuestTableF <- data.frame(QuestTableF = QuestTable)
+      
+      # Process tasks
+      Tasktable <- sapply(InitialPlayer$taskItems, function(temp) {
+        if (length(temp) == 0) {
+          "NA"
+        } else {
+          paste(apply(temp, 1, function(row) paste(row, collapse = ",")), collapse = ";")
+        }
+      })
+      TasktableF <- data.frame(TasktableF = Tasktable)
+    }
+    
+    # Combine quest and task data
+    QuestTask <- data.frame(QuestTableF, TasktableF)
+    
+    # Extract other data
+    buildVersion <- InitialPlayer$buildVersion
+    
+    # Final table
+    excludedCols <- c("sceneNames", "playerPosition", "cameraDirection", "taskItems", "quests")
+    FinaltableT <- InitialPlayer[, !names(InitialPlayer) %in% excludedCols]
+    FinaltableTF <- data.frame(
+      FinaltableT,
+      PlayerpostionX, PlayerpostionZ, PlayerpostionY,
+      CamerarotationX, CamerarotationZ, CamerarotationY,
+      QuestTask,
+      ScenenameCF,
+      buildVersion
+    )
+    
+    Wholegeneraltable[[playerName]] <- FinaltableTF
   }
-  result="success"
-  tempDataframe=data.frame(argumentTitle,argumentName,result,attemptTime,feedbackGot)
-  argumentSuccessDetail=rbind(argumentSuccessDetail,tempDataframe)
-}
-#str(argumentSuccessDetail)
-argumentSuccessCombine=cbind(argumentSuccess,argumentSuccessDetail)
-colnames(argumentSuccessCombine)
-
-playerList=unique(argumentSuccessCombine$playerName)
-
-argumentSuccessTable=argumentSuccessCombine %>% select("playerName","timestamp","teacherId","argumentTitle","result","attemptTime","feedbackGot")
-
-argumentSuccessStates=c()
-for(i in 1:length(playerList)){
-  temp=argumentSuccessTable %>% filter(playerName==playerList[i])
-  argumentList=unique(temp$argumentTitle)
-  argumetStates=c()
-  for(j in 1:length(argumentList)){
-    temp1=temp %>%  filter(argumentTitle==argumentList[j])
-    playerName=temp1$playerName[1]
-    teacherId=temp1$teacherId[1]
-    argumentTitle=temp1$argumentTitle[1]
-    result="success"
-    maxAttemptTime=max(temp1$attemptTime)
-    feedBackList=unique(temp1$feedbackGot)
-    feedBacks=paste(feedBackList,sep=";")
-    successTrialSum=nrow(temp1)
-    tempDataframe=data.frame(playerName,teacherId,argumentTitle,result,maxAttemptTime,feedBacks,successTrialSum)
-    argumetStates=rbind(argumetStates,tempDataframe)
-  }
-  argumentSuccessStates=rbind(argumentSuccessStates,argumetStates)
-}
-
-#str(argumentSuccessStates)
-
-unique(argumentSuccessStates$argumentTitle)
-
-write.csv(argumentSuccessStates,"rawData/argumentSuccessStatesNew.csv")
-argumentSuccessStates=read.csv("rawData/argumentSuccessStates.csv")[,-1]
-#str(argumentSuccessStates)
-
-argumentSuccessStatesNew=read.csv("rawData/argumentSuccessStatesNew.csv",stringsAsFactors = FALSE)[,-1]
-#str(argumentSuccessStatesNew)
-
-argumentSuccess=argumentSuccessStatesNew %>% select("playerName","argumentTitle","successTrialSum")
-argumentSuccessS=spread(argumentSuccess,argumentTitle,successTrialSum)
-
-colnames(argumentSuccessS)[-1]=paste(colnames(argumentSuccessS)[-1],"success",sep="_")
-
-playerList=unique(argumentSuccessS$playerName)
-
-argumentCompleteStatus=c()
-for(i in 1:length(playerList)){
-  playerOne=argumentSuccessS %>% filter(playerName == playerList[i])
-  playerOne1=playerOne[,!is.na(playerOne)]
-  argumentNumber=ncol(playerOne1)-1
-  totalArgumentNumber=ncol(playerOne)-1
-  argumentCompletePercentage=round(argumentNumber/totalArgumentNumber,3)
-  playerName=playerList[i]
-  tempDataframe=data.frame(playerName,argumentCompletePercentage)
-  argumentCompleteStatus=rbind(argumentCompleteStatus,tempDataframe)
+  
+  # Combine all player tables into one data frame
+  Wholegeneraltable <- do.call(rbind, Wholegeneraltable)
+  return(Wholegeneraltable)
 }
 
-argumentSuccessStatement=full_join(argumentCompleteStatus,argumentSuccessS,by="playerName")
-argumentSuccessStatement[is.na(argumentSuccessStatement)]=0
+write.csv(argumentSuccessStates, "rawData/wholeGeneralTable.csv")
 
-write.csv(argumentSuccessStatement,"rawData/argumentSuccessStatementNew.csv")
-
-### argument failure
-argumentFailure=filedTestTwoNew %>% filter(type=="ArgumentationFailedEvent")
-#str(argumentFailure)
-
-argumentFailureDetail=c()
-for(i in 1:nrow(argumentFailure)){
-  temp=mhsEventDetailsById(conn, argumentFailure$ItemID[i])
+# Process argument success
+process_argument_success <- function(data) {
+  argumentSuccess <- data %>% filter(type == "ArgumentationSuccessEvent")
   
-  claimChoseName=temp$eventDescription$claim$name
-  reasoningChoseName=temp$eventDescription$solutionReasonings[[1]]$reasoning$name
-  evidenceChoseNameList=temp$eventDescription$solutionReasonings[[1]]$evidences[[1]]$name
-  selectRows=evidenceChoseNameList[-which(evidenceChoseNameList=="")]
-  evidenceChoseName=paste(selectRows,collapse = "")
+  argumentSuccessDetail <- bind_rows(lapply(1:nrow(argumentSuccess), function(i) {
+    temp <- mhsEventDetailsById(conn, argumentSuccess$ItemID[i])
+    extract_argument_details(temp, "success")
+  }))
   
-  if(length(evidenceChoseName)==0){
-    evidenceChoseName=""
-  }else{
-    evidenceChoseName=evidenceChoseName
-  }
+  argumentSuccessCombine <- cbind(argumentSuccess, argumentSuccessDetail)
+  playerList <- unique(argumentSuccessCombine$playerName)
   
-  choiceCombine=data.frame(claimChoseName,reasoningChoseName,evidenceChoseName)
-  briefChoice=choiceCombine %>% unite("choiceCombine",c("claimChoseName","reasoningChoseName","evidenceChoseName"),sep = ",")
-  argumentCombineChoice=briefChoice$choiceCombine
+  argumentSuccessStates <- bind_rows(lapply(playerList, function(player) {
+    temp <- argumentSuccessCombine %>% filter(playerName == player)
+    bind_rows(lapply(unique(temp$argumentTitle), function(title) {
+      temp1 <- temp %>% filter(argumentTitle == title)
+      data.frame(
+        playerName = player,
+        teacherId = temp1$teacherId[1],
+        argumentTitle = title,
+        result = "success",
+        maxAttemptTime = max(temp1$attemptTime),
+        feedBacks = paste(unique(temp1$feedbackGot), collapse = ";"),
+        successTrialSum = nrow(temp1)
+      )
+    }))
+  }))
   
-  claimChoseContent=temp$eventDescription$claim$description
-  reasoningChoseContent=temp$eventDescription$solutionReasonings[[1]]$reasoning$description
-  evidenceChoseContentList=temp$eventDescription$solutionReasonings[[1]]$evidences[[1]]$description
-  selectCRows=evidenceChoseContentList[-which(evidenceChoseContentList=="")]
-  evidenceChoseContent=paste(selectCRows,collapse=",") 
-  
-  if(length(evidenceChoseContent)==0){
-    evidenceChoseContent=""
-  }else{
-    evidenceChoseContent=evidenceChoseContent
-  }
-  
-  contentCombine=data.frame(claimChoseContent,reasoningChoseContent,evidenceChoseContent)
-  briefContent=contentCombine %>% unite("contentCombine",c("claimChoseContent","reasoningChoseContent","evidenceChoseContent"),sep = ";")
-  argumentCombineContent=briefContent$contentCombine
-  
-  attemptTime=temp$eventDescription$argument$attempt
-  argumentName=temp$eventDescription$argument$name
-  argumentTitle=temp$eventDescription$argument$title
-  feedbackGot=temp$eventDescription$feedback
-  
-  if(is.null(feedbackGot)){
-    feedbackGot=" "
-  }else{
-    feedbackGot=feedbackGot
-  }
-  
-  result="failure"
-  tempDataframe=data.frame(argumentTitle,argumentName,result,attemptTime,feedbackGot,argumentCombineChoice,argumentCombineContent)
-  
-  argumentFailureDetail=rbind(argumentFailureDetail,tempDataframe)
-}
-#str(argumentFailureDetail)
-
-argumentFailureCombine=cbind(argumentFailure,argumentFailureDetail)
-#colnames(argumentFailureCombine)
-#unique(argumentFailureCombine$argumentTitle)
-
-playerList=unique(argumentFailureCombine$playerName)
-write.csv(argumentFailureCombine,"rawData/argumentFailureCombineNew.csv")
-
-argumentFailureStates=c()
-for(i in 1:length(playerList)){
-  temp=argumentFailureCombine %>% filter(playerName==playerList[i])
-  temp1=temp[!duplicated(temp$timestamp),]
-  argumentList=unique(temp1$argumentTitle)
-  argumetStates=c()
-  for(j in 1:length(argumentList)){
-    temp2=temp1 %>%  filter(argumentTitle==argumentList[j])
-    playerName=temp2$playerName[1]
-    teacherId=temp2$teacherId[1]
-    argumentTitle=temp2$argumentTitle[1]
-    result="failure"
-    maxAttemptTime=max(temp1$attemptTime)
-    feedBackList=unique(temp1$feedbackGot)
-    feedBacks=paste(feedBackList,collapse = ";")
-    failureTrialSum=nrow(temp2)
-    argumentFailureChoice=temp2$argumentCombineChoice
-    argumentFailureContent=temp2$argumentCombineContent
-    tempDataframe=data.frame(playerName,teacherId,argumentTitle,result,maxAttemptTime,feedBacks,failureTrialSum,argumentFailureChoice,argumentFailureContent)
-    argumetStates=rbind(argumetStates,tempDataframe)
-  }
-  argumentFailureStates=rbind(argumentFailureStates,argumetStates)
+  write.csv(argumentSuccessStates, "rawData/argumentSuccessStatesNew.csv")
+  argumentSuccessStates
 }
 
-#str(argumentFailureStates)
-#unique(argumentFailureStates$argumentTitle)
-playerOne=argumentFailureStates %>% filter(playerName == playerList[100])
-
-write.csv(argumentFailureStates,"rawData/argumentFailureStatesNew.csv")
-
-argumentFailure=argumentFailureStates %>% select("playerName","argumentTitle","failureTrialSum")
-argumentFailure1=argumentFailure[!duplicated(argumentFailure),]
-argumentFailureS=spread(argumentFailure1,argumentTitle,failureTrialSum)
-
-argumentFullStatement=full_join(argumentSuccessStatement,argumentFailureS,by="playerName")
-
-argumentFullStatementNew=read.csv("rawData/argumentFullStatementNew.csv",stringsAsFactors = FALSE)[,-1]
-str(argumentFullStatementNew)
-
-relatedCol=argumentFullStatementNew %>% select("playerName","Argumentation.Tutorial_success","Argumentation.Tutorial_failure")
-
-playerList=unique(relatedCol$playerName)
-
-firstItemScore=c()
-for(i in 1:length(playerList)){
-  temp=relatedCol %>% filter(playerName==playerList[i])
-  if (temp$Argumentation.Tutorial_success >0 & temp$Argumentation.Tutorial_failure==0){
-    tutorialArgScore=1
-  }else{
-    tutorialArgScore=0
-  }
-  playerName=playerList[i]
-  tempDataFrame=data.frame(playerName,tutorialArgScore)
-  firstItemScore=rbind(firstItemScore,tempDataFrame)
+# Process argument failure
+process_argument_failure <- function(data) {
+  argumentFailure <- data %>% filter(type == "ArgumentationFailedEvent")
+  
+  argumentFailureDetail <- bind_rows(lapply(1:nrow(argumentFailure), function(i) {
+    temp <- mhsEventDetailsById(conn, argumentFailure$ItemID[i])
+    
+    claimChoseName <- temp$eventDescription$claim$name
+    reasoningChoseName <- temp$eventDescription$solutionReasonings[[1]]$reasoning$name
+    evidenceChoseNameList <- temp$eventDescription$solutionReasonings[[1]]$evidences[[1]]$name
+    evidenceChoseName <- paste(evidenceChoseNameList[evidenceChoseNameList != ""], collapse = "")
+    
+    claimChoseContent <- temp$eventDescription$claim$description
+    reasoningChoseContent <- temp$eventDescription$solutionReasonings[[1]]$reasoning$description
+    evidenceChoseContentList <- temp$eventDescription$solutionReasonings[[1]]$evidences[[1]]$description
+    evidenceChoseContent <- paste(evidenceChoseContentList[evidenceChoseContentList != ""], collapse = ",")
+    
+    data.frame(
+      argumentTitle = temp$eventDescription$argument$title,
+      argumentName = temp$eventDescription$argument$name,
+      result = "failure",
+      attemptTime = temp$eventDescription$argument$attempt,
+      feedbackGot = ifelse(is.null(temp$eventDescription$feedback), " ", temp$eventDescription$feedback),
+      argumentCombineChoice = paste(claimChoseName, reasoningChoseName, evidenceChoseName, sep = ","),
+      argumentCombineContent = paste(claimChoseContent, reasoningChoseContent, evidenceChoseContent, sep = ";")
+    )
+  }))
+  
+  argumentFailureCombine <- cbind(argumentFailure, argumentFailureDetail)
+  write.csv(argumentFailureCombine, "rawData/argumentFailureCombineNew.csv")
+  
+  playerList <- unique(argumentFailureCombine$playerName)
+  argumentFailureStates <- bind_rows(lapply(playerList, function(player) {
+    temp <- argumentFailureCombine %>% filter(playerName == player) %>% distinct(timestamp, .keep_all = TRUE)
+    bind_rows(lapply(unique(temp$argumentTitle), function(title) {
+      temp1 <- temp %>% filter(argumentTitle == title)
+      data.frame(
+        playerName = player,
+        teacherId = temp1$teacherId[1],
+        argumentTitle = title,
+        result = "failure",
+        maxAttemptTime = max(temp1$attemptTime),
+        feedBacks = paste(unique(temp1$feedbackGot), collapse = ";"),
+        failureTrialSum = nrow(temp1),
+        argumentFailureChoice = temp1$argumentCombineChoice[1],
+        argumentFailureContent = temp1$argumentCombineContent[1]
+      )
+    }))
+  }))
+  
+  write.csv(argumentFailureStates, "rawData/argumentFailureStatesNew.csv")
+  argumentFailureStates
 }
+
+# Main calculation
+argumentSuccessStates <- process_argument_success(filedTestTwoNew)
+argumentFailureStates <- process_argument_failure(filedTestTwoNew)
+
+# Combine success and failure
+argumentFullStatement <- full_join(argumentSuccessStates, argumentFailureStates, by = c("playerName", "argumentTitle"))
+write.csv(argumentFullStatement, "rawData/argumentFullStatementNew.csv")
+
+# Process first item score
+calculate_first_item_score <- function(data) {
+  relatedCol <- data %>% select(playerName, Argumentation.Tutorial_success, Argumentation.Tutorial_failure)
+  playerList <- unique(relatedCol$playerName)
+  
+  firstItemScore <- bind_rows(lapply(playerList, function(player) {
+    temp <- relatedCol %>% filter(playerName == player)
+    tutorialArgScore <- ifelse(temp$Argumentation.Tutorial_success > 0 & temp$Argumentation.Tutorial_failure == 0, 1, 0)
+    data.frame(playerName = player, tutorialArgScore = tutorialArgScore)
+  }))
+  
+  firstItemScore
+}
+
+relatedCol <- argumentFullStatement %>%
+  select(playerName, Argumentation.Tutorial_success, Argumentation.Tutorial_failure)
+
+firstItemScore <- calculate_first_item_score(relatedCol)
+
+# Save first item score
+write.csv(firstItemScore, "firstItemScore.csv")
 
 # 2nd embedded score: 4.2 argue which watershed is bigger
-relatedCol1=argumentFullStatementNew %>% select("playerName","Watershed_success","Watershed_failure")
-str(relatedCol1)
+relatedCol1 <- argumentFullStatementNew %>%
+  select(playerName, Watershed_success, Watershed_failure)
 
-secondItemScore=c()
-for(i in 1:length(playerList)){
-  temp=relatedCol1 %>% filter(playerName==playerList[i])
-  if(temp$Watershed_success>0 & temp$Watershed_failure <3){
-    biggerArgScore=2
-  }else if(temp$Watershed_success>0 & temp$Watershed_failure==3){
-    biggerArgScore=1
-  }else{
-    biggerArgScore=0
+# Helper function to calculate the score for each player
+calculate_bigger_arg_score <- function(player, data) {
+  temp <- data %>% filter(playerName == player)
+  if (temp$Watershed_success > 0 & temp$Watershed_failure < 3) {
+    biggerArgScore <- 2
+  } else if (temp$Watershed_success > 0 & temp$Watershed_failure == 3) {
+    biggerArgScore <- 1
+  } else {
+    biggerArgScore <- 0
   }
-  playerName=playerList[i]
-  tempDataFrame=data.frame(playerName,biggerArgScore)
-  secondItemScore=rbind(secondItemScore,tempDataFrame)
+  data.frame(playerName = player, biggerArgScore = biggerArgScore)
 }
 
+# Generate scores for all players
+secondItemScore <- bind_rows(lapply(unique(relatedCol1$playerName), calculate_bigger_arg_score, data = relatedCol1))
+
+# View the resulting data frame structure
+str(secondItemScore)
+
+# Optionally save the results to a CSV file
+write.csv(secondItemScore, "secondItemScore.csv", row.names = FALSE)
 
 # 3rd embedded score: 3.1 convince bill the pollutant is nearby
-relatedCol2=argumentFullStatementNew %>% select("playerName","Pollution.Upstream_success","Pollution.Upstream_failure")
-str(relatedCol2)
+relatedCol2 <- argumentFullStatementNew %>%
+  select(playerName, Pollution.Upstream_success, Pollution.Upstream_failure)
 
-thirdItemScore=c()
-for(i in 1:length(playerList)){
-  temp=relatedCol2 %>% filter(playerName==playerList[i])
-  if(temp$Pollution.Upstream_success>0 & temp$Pollution.Upstream_failure <3){
-    upstreamArgScore=2
-  }else if(temp$Pollution.Upstream_success>0 & temp$Pollution.Upstream_failure>=3 & temp$Pollution.Upstream_failure<6){
-    upstreamArgScore=1
-  }else{
-    upstreamArgScore=0
-  }
-  playerName=playerList[i]
-  tempDataFrame=data.frame(playerName,upstreamArgScore)
-  thirdItemScore=rbind(thirdItemScore,tempDataFrame)
+# Helper function to calculate the upstream argument score for each player
+calculate_upstream_arg_score <- function(player, data) {
+  temp <- data %>% filter(playerName == player)
+  
+  # Apply the conditions to determine the score
+  upstreamArgScore <- ifelse(
+    temp$Pollution.Upstream_success > 0 & temp$Pollution.Upstream_failure < 3, 2,
+    ifelse(
+      temp$Pollution.Upstream_success > 0 & temp$Pollution.Upstream_failure >= 3 & temp$Pollution.Upstream_failure < 6, 1,
+      0
+    )
+  )
+  
+  data.frame(playerName = player, upstreamArgScore = upstreamArgScore)
 }
+
+# Generate scores for all players
+thirdItemScore <- bind_rows(lapply(unique(relatedCol2$playerName), calculate_upstream_arg_score, data = relatedCol2))
+
+# View the resulting data frame structure
+str(thirdItemScore)
+
+# Optionally save the results to a CSV file
+write.csv(thirdItemScore, "thirdItemScore.csv", row.names = FALSE)
 
 # 4th embedded score: 9.1 who flooded the armory
-relatedCol3=argumentFullStatementNew %>% select("playerName","Flooding.the.armory_failure","Flooding.the.armory_success")
-str(relatedCol3)
+relatedCol3 <- argumentFullStatementNew %>%
+  select(playerName, Flooding.the.armory_failure, Flooding.the.armory_success)
 
-forthItemScore=c()
-for(i in 1:length(playerList)){
-  temp=relatedCol3 %>% filter(playerName==playerList[i])
-  if(temp$Flooding.the.armory_success>0 & temp$Flooding.the.armory_failure <3){
-    floodArmoryScore=2
-  }else if(temp$Flooding.the.armory_success>0 & temp$Flooding.the.armory_failure>=3 & temp$Flooding.the.armory_failure<6){
-    floodArmoryScore=1
-  }else{
-    floodArmoryScore=0
-  }
-  playerName=playerList[i]
-  tempDataFrame=data.frame(playerName,floodArmoryScore)
-  forthItemScore=rbind(forthItemScore,tempDataFrame)
+# Helper function to calculate the flooding armory score for each player
+calculate_flood_armory_score <- function(player, data) {
+  temp <- data %>% filter(playerName == player)
+  
+  # Apply the conditions to determine the score
+  floodArmoryScore <- ifelse(
+    temp$Flooding.the.armory_success > 0 & temp$Flooding.the.armory_failure < 3, 2,
+    ifelse(
+      temp$Flooding.the.armory_success > 0 & temp$Flooding.the.armory_failure >= 3 & temp$Flooding.the.armory_failure < 6, 1,
+      0
+    )
+  )
+  
+  data.frame(playerName = player, floodArmoryScore = floodArmoryScore)
 }
+
+# Generate scores for all players
+forthItemScore <- bind_rows(lapply(unique(relatedCol3$playerName), calculate_flood_armory_score, data = relatedCol3))
+
+# View the resulting data frame structure
+str(forthItemScore)
+
+# Optionally save the results to a CSV file
+write.csv(forthItemScore, "forthItemScore.csv", row.names = FALSE)
 
 # 5th embedded score: 5.1 convince Bill
+relatedCol4 <- argumentFullStatementNew %>%
+  select(playerName, Making.water.for.Bill_failure, Making.water.for.Bill_success)
 
-relatedCol4=argumentFullStatementNew %>% select("playerName","Making.water.for.Bill_failure","Making.water.for.Bill_success")
-str(relatedCol4)
-
-fifthItemScore=c()
-for(i in 1:length(playerList)){
-  temp=relatedCol4 %>% filter(playerName==playerList[i])
-  if(temp$Making.water.for.Bill_success>0 & temp$Making.water.for.Bill_failure <3){
-    convinceBillScore=2
-  }else if(temp$Making.water.for.Bill_success>0 & temp$Making.water.for.Bill_failure>=3 & temp$Making.water.for.Bill_failure<6){
-    convinceBillScore=1
-  }else{
-    convinceBillScore=0
-  }
-  playerName=playerList[i]
-  tempDataFrame=data.frame(playerName,convinceBillScore)
-  fifthItemScore=rbind(fifthItemScore,tempDataFrame)
+# Helper function to calculate the convince Bill score for each player
+calculate_convince_bill_score <- function(player, data) {
+  temp <- data %>% filter(playerName == player)
+  
+  # Apply the conditions to determine the score
+  convinceBillScore <- ifelse(
+    temp$Making.water.for.Bill_success > 0 & temp$Making.water.for.Bill_failure < 3, 2,
+    ifelse(
+      temp$Making.water.for.Bill_success > 0 & temp$Making.water.for.Bill_failure >= 3 & temp$Making.water.for.Bill_failure < 6, 1,
+      0
+    )
+  )
+  
+  data.frame(playerName = player, convinceBillScore = convinceBillScore)
 }
+
+# Generate scores for all players
+fifthItemScore <- bind_rows(lapply(unique(relatedCol4$playerName), calculate_convince_bill_score, data = relatedCol4))
+
+# View the resulting data frame structure
+str(fifthItemScore)
+
+# Optionally save the results to a CSV file
+write.csv(fifthItemScore, "fifthItemScore.csv", row.names = FALSE)
 
 # 6th embedded score: CREi system (3 and all the rest)
 
-ballIncor=filedTestTwoNew %>% filter(type=="CREiIncorrect")
-str(ballIncor)
-playerList=unique(filedTestTwoNew$playerName)
+ballIncor <- filedTestTwoNew %>% filter(type == "CREiIncorrect")
+ballCor <- filedTestTwoNew %>% filter(type == "CREiCorrect")
 
-ballIncorDetail=c()
-for(i in 1:nrow(ballIncor)){
-  temp=mhsEventDetailsById(conn, ballIncor$ItemID[i])
-  chooseArguType=temp$eventDescription$componentType
-  rightType=temp$eventDescription$component$componentType
-  rightContent=temp$eventDescription$component$componentText
-  outcome="incorrect"
-  tempDataFrame=data.frame(rightType,rightContent,chooseArguType,outcome)
-  ballIncorDetail=rbind(ballIncorDetail,tempDataFrame)
+# Function to process CREi details
+process_crei_details <- function(data, outcome_label) {
+  bind_rows(lapply(1:nrow(data), function(i) {
+    temp <- mhsEventDetailsById(conn, data$ItemID[i])
+    data.frame(
+      rightType = temp$eventDescription$component$componentType,
+      rightContent = temp$eventDescription$component$componentText,
+      chooseArguType = temp$eventDescription$componentType,
+      outcome = outcome_label
+    )
+  }))
 }
 
-ballIncorCombine=cbind(ballIncor,ballIncorDetail)
+# Process incorrect and correct details
+ballIncorDetail <- process_crei_details(ballIncor, "incorrect")
+ballCorDetail <- process_crei_details(ballCor, "correct")
 
-ballCor=filedTestTwoNew %>% filter(type=="CREiCorrect")
-str(ballCor)
-playerList=unique(filedTestTwoNew$playerName)
+# Combine details with original data
+ballIncorCombine <- cbind(ballIncor, ballIncorDetail)
+ballCorCombine <- cbind(ballCor, ballCorDetail)
 
-ballCorDetail=c()
-for(i in 1:nrow(ballCor)){
-  temp=mhsEventDetailsById(conn, ballIncor$ItemID[i])
-  chooseArguType=temp$eventDescription$componentType
-  rightType=temp$eventDescription$component$componentType
-  rightContent=temp$eventDescription$component$componentText
-  outcome="correct"
-  tempDataFrame=data.frame(rightType,rightContent,chooseArguType,outcome)
-  ballCorDetail=rbind(ballCorDetail,tempDataFrame)
-}
+# Combine incorrect and correct events
+ballStatement <- rbind(ballIncorCombine, ballCorCombine)
+write.csv(ballStatement, "rawData/ballStatementNew.csv", row.names = FALSE)
 
-ballCorCombine=cbind(ballCor,ballCorDetail)
+# Reload processed data if needed
+ballStatement <- read.csv("rawData/ballStatement.csv", stringsAsFactors = FALSE)[, -1]
 
-ballStatement=rbind(ballIncorCombine,ballCorCombine)
-write.csv(ballStatement,"rawData/ballStatementNew.csv")
+# Extract unique player names
+playerListCREi <- unique(ballStatement$playerName)
 
-ballStatement=read.csv("rawData/ballStatement.csv",stringsAsFactors = FALSE)[,-1]
-str(ballStatement)
-
-playerListCREi=unique(ballStatement$playerName)
-
-CREiNumbers=c()
-for (i in 1:length(playerListCREi)){
-  temp=ballStatement %>% filter(playerName==playerListCREi[i])
-  temp1=temp %>% filter(outcome=="incorrect")
-  incorrectNumber=nrow(temp1)
-  temp2=temp %>% filter(outcome=="correct")
-  correctNumber=nrow(temp2)
-  incor.Evidence1=temp1 %>% filter(chooseArguType == "EVIDENCE")
-  incor.Evidence=nrow(incor.Evidence1)
-  incor.Reasoning1=temp1 %>% filter(chooseArguType == "REASONING")
-  incor.Reasoning=nrow(incor.Reasoning1)
-  incor.Claim1=temp1 %>% filter(chooseArguType == "CLAIM")
-  incor.Claim=nrow(incor.Claim1)
-  cor.Evidence1=temp2 %>% filter(chooseArguType == "REASONING")
-  cor.Evidence=nrow(cor.Evidence1)
-  cor.Reasoning1=temp2 %>% filter(chooseArguType == "EVIDENCE")
-  cor.Reasoning=nrow(cor.Reasoning1)
-  cor.Claim1=temp2 %>% filter(chooseArguType == "CLAIM")
-  cor.Claim=nrow(cor.Claim1)
-  playerName=playerListCREi[i]
-  tempDataFrame=data.frame(playerName,incorrectNumber,correctNumber,incor.Evidence,incor.Reasoning,incor.Claim,cor.Evidence,cor.Reasoning,cor.Claim)
-  CREiNumbers=rbind(CREiNumbers,tempDataFrame)
-}
-
-write.csv(CREiNumbers,"rawData/CREiNumbersNew.csv")
-
-CREiNumbersNew=read.csv("rawData/CREiNumbersCombineWithTC.csv",stringsAsFactors = FALSE)[,-1]
-str(CREiNumbersNew)
-
-relatedCol5=CREiNumbersNew %>% select("playerName","incorrectNumber","correctNumber")
-
-sixthItemScore=c()
-for(i in 1:length(playerList)){
-  temp=relatedCol5 %>% filter(playerName==playerList[i])
+# Calculate CREi numbers for each player
+calculate_crei_numbers <- function(player, data) {
+  temp <- data %>% filter(playerName == player)
+  incorrectNumber <- nrow(temp %>% filter(outcome == "incorrect"))
+  correctNumber <- nrow(temp %>% filter(outcome == "correct"))
   
-  if (nrow(temp)==0){
-    CREIScore=0
-  }else{
-    sumNumber=sum(temp$incorrectNumber, temp$correctNumber)
-    CREIScore=(temp$correctNumber/sumNumber * 1) + (temp$incorrectNumber/sumNumber * (-1/3))
+  incor.Evidence <- nrow(temp %>% filter(outcome == "incorrect", chooseArguType == "EVIDENCE"))
+  incor.Reasoning <- nrow(temp %>% filter(outcome == "incorrect", chooseArguType == "REASONING"))
+  incor.Claim <- nrow(temp %>% filter(outcome == "incorrect", chooseArguType == "CLAIM"))
+  
+  cor.Evidence <- nrow(temp %>% filter(outcome == "correct", chooseArguType == "EVIDENCE"))
+  cor.Reasoning <- nrow(temp %>% filter(outcome == "correct", chooseArguType == "REASONING"))
+  cor.Claim <- nrow(temp %>% filter(outcome == "correct", chooseArguType == "CLAIM"))
+  
+  data.frame(
+    playerName = player,
+    incorrectNumber = incorrectNumber,
+    correctNumber = correctNumber,
+    incor.Evidence = incor.Evidence,
+    incor.Reasoning = incor.Reasoning,
+    incor.Claim = incor.Claim,
+    cor.Evidence = cor.Evidence,
+    cor.Reasoning = cor.Reasoning,
+    cor.Claim = cor.Claim
+  )
+}
+
+# Generate CREi numbers for all players
+CREiNumbers <- bind_rows(lapply(playerListCREi, calculate_crei_numbers, data = ballStatement))
+write.csv(CREiNumbers, "rawData/CREiNumbersNew.csv", row.names = FALSE)
+
+# Reload processed CREi numbers if needed
+CREiNumbersNew <- read.csv("rawData/CREiNumbersCombineWithTC.csv", stringsAsFactors = FALSE)[, -1]
+
+# Calculate CREi score for sixth item
+relatedCol5 <- CREiNumbersNew %>%
+  select(playerName, incorrectNumber, correctNumber)
+
+calculate_crei_score <- function(player, data) {
+  temp <- data %>% filter(playerName == player)
+  
+  if (nrow(temp) == 0) {
+    CREIScore <- 0
+  } else {
+    sumNumber <- sum(temp$incorrectNumber, temp$correctNumber)
+    CREIScore <- (temp$correctNumber / sumNumber * 1) + (temp$incorrectNumber / sumNumber * (-1 / 3))
   }
   
-  playerName=playerList[i]
-  tempDataFrame=data.frame(playerName,CREIScore)
-  sixthItemScore=rbind(sixthItemScore,tempDataFrame)
+  data.frame(playerName = player, CREIScore = CREIScore)
 }
+
+# Generate CREi scores for all players
+sixthItemScore <- bind_rows(lapply(unique(relatedCol5$playerName), calculate_crei_score, data = relatedCol5))
+
+# View structure and save the results
+str(sixthItemScore)
+write.csv(sixthItemScore, "sixthItemScore.csv", row.names = FALSE)
 
 # 7th embedded score: 5.2 Jasper's proposal
-dialogueEvents=filedTestTwo %>% filter(type=="DialogueEvent")
-str(dialogueEvents)
+# Select dialogue events
+dialogueEvents <- filedTestTwo %>% filter(type == "DialogueEvent")
+dialogueNodeEvents <- filedTestTwoNew %>% filter(type == "DialogueNodeEvent")
 
-dialogueDetail=c()
-for(i in 717271:nrow(dialogueEvents)){
-  temp=mhsEventDetailsById(conn, dialogueEvents$ItemID[i])
-  dialogueDetail=rbind.fill(dialogueDetail,temp)
+# Helper function to process dialogue details
+process_dialogue_details <- function(events, conn) {
+  bind_rows(lapply(1:nrow(events), function(i) {
+    temp <- mhsEventDetailsById(conn, events$ItemID[i])
+    temp
+  }))
 }
 
-dialogueDetail1=dialogueDetail
-dialogueDetail2=rbind(dialogueDetail1,dialogueDetail)
-nrow(dialogueDetail2)
-dialogueCombine=cbind(dialogueEvents,dialogueDetail2)
-str(dialogueCombine)
+# Process dialogue details
+dialogueDetail <- process_dialogue_details(dialogueEvents, conn)
+dialogueCombine <- cbind(dialogueEvents, dialogueDetail)
+write.csv(dialogueCombine, "rawData/dialogueCombine.csv", row.names = FALSE)
 
-write.csv(dialogueCombine,"dialogueCombine.csv")
+# Process dialogue node details
+dialogueNodeDetail <- process_dialogue_details(dialogueNodeEvents, conn)
+dialogueNodeCombine <- cbind(dialogueNodeEvents, dialogueNodeDetail)
+write.csv(dialogueNodeCombine, "rawData/dialogueNodeCombineNew.csv", row.names = FALSE)
 
-dialogueNodeEvents=filedTestTwoNew %>% filter(type=="DialogueNodeEvent")
-str(dialogueNodeEvents)
+# Combine dialogue node versions
+dialogueNodeCombine <- read.csv("rawData/dialogueNodeCombine.csv", stringsAsFactors = FALSE)[, -1]
+dialogueNodeCombineNew <- read.csv("rawData/dialogueNodeCombineNew.csv", stringsAsFactors = FALSE)[, -1]
+dialogueNodeAllVersion <- rbind(dialogueNodeCombine, dialogueNodeCombineNew)
+write.csv(dialogueNodeAllVersion, "rawData/dialogueNodeAllVersion.csv", row.names = FALSE)
 
-dialogueNodeDetail=c()
-for(i in 1:nrow(dialogueNodeEvents)){
-  temp=mhsEventDetailsById(conn, dialogueNodeEvents$ItemID[i])
-  dialogueNodeDetail=rbind.fill(dialogueNodeDetail,temp)
-}
+# Prepare critique data
+dialogueReference <- returnTidyDialogueReferenceData(conn, "0.11.171")
+dialogue5 <- c("Is there anything wrong with it?")
+inDialogue4 <- dialogueReference[grep(dialogue5, dialogueReference$content), ]
 
-str(dialogueNodeDetail)
-table(dialogueNodeDetail$choiceID)
-dialogueNodeDetail1
-dialogueNodeDetail2=rbind(dialogueNodeDetail1,dialogueNodeDetail)
-str(dialogueNodeDetail2)
-dialogueNodeDetail3=rbind(dialogueNodeDetail2,dialogueNodeDetail)
-str(dialogueNodeDetail3)
-dialogueNodeDetail4=rbind(dialogueNodeDetail3,dialogueNodeDetail)
-str(dialogueNodeDetail4)
+# Filter dialogue data for Jasper's critique
+dialogueNode5 <- dialogueNodeCombineNew %>% filter(dialogueID == 425)
+dialogueNode5F <- dialogueNode5 %>% filter(dialogueNodeEventType == "DialogueNodeFinishEvent")
 
-dialogueNodeCombine=cbind(dialogueNodeEvents,dialogueNodeDetail)
-str(dialogueNodeCombine)
-write.csv(dialogueNodeCombine,"rawData/dialogueNodeCombineNew.csv")
+# Add choice content
+choiceID <- c(0, 1, 2)
+choiceContent <- c("Agree with Jasper.", "Disagree, Jasper forgot a claim.", "Disagree, Jasper forgot evidence.")
+dialogueChoice5 <- data.frame(choiceID, choiceContent)
+dialogueNode5FWChoiceC <- left_join(dialogueNode5F, dialogueChoice5, by = "choiceID")
 
-dialogueNodeCombine=read.csv("rawData/dialogueNodeCombine.csv",stringsAsFactors = FALSE)[,-1]
-str(dialogueNodeCombine)
-
-dialogueNodeCombineNew=read.csv("rawData/dialogueNodeCombineNew.csv",stringsAsFactors = FALSE)[,-1]
-str(dialogueNodeCombineNew)
-
-dialogueNodeAllVersion = rbind(dialogueNodeCombine,dialogueNodeCombineNew)
-str(dialogueNodeAllVersion)
-write.csv(dialogueNodeAllVersion,"dialogueNodeAllVersion.csv")
-
-dialogueFreference=returnTidyDialogueReferenceData(conn, "0.11.171")
-
-dialogue5=c("Is there anything wrong with it?")
-inDialogue4=dialogueFreference[grep(dialogue5,dialogueFreference$content),]
-
-dialogueNode5=dialogueNodeCombineNew %>% filter(dialogueID==425)
-str(dialogueNode5)
-table(dialogueNode5$choiceID)
-dialogueNode5F=dialogueNode5 %>% filter(dialogueNodeEventType == "DialogueNodeFinishEvent")
-str(dialogueNode5F)
-
-choiceID=c(0,1,2)
-choiceContent=c("Agree with Jasper.","Disagree, Jasper forgot a claim.","Disagree, Jasper forgot evidence.")
-
-dialogueChoice5=data.frame(choiceID,choiceContent)
-
-dialogueNode5FWChoiceC=left_join(dialogueNode5F,dialogueChoice5,by="choiceID")
-
-str(dialogueNode5FWChoiceC)
-
-playerList=unique(dialogueNodeCombineNew$playerName)
-
-JasperCritique=c()
-for(i in 1:length(playerList)){
-  temp=dialogueNode5FWChoiceC %>% filter(playerName==playerList[i])
-  if(nrow(temp)==0){
-    next
-  }else{
-    choices=unique(temp$choiceContent)
-    frequencies=c()
-    for(j in 1:length(choices)){
-      temp1=temp %>% filter(choiceContent == choices[j])
-      number=nrow(temp1)
-      choiceContent=choices[j]
-      playerName=playerList[i]
-      tempDataFrame=data.frame(playerName, choiceContent, number)
-      frequencies=rbind(frequencies,tempDataFrame)
-    }
-    JasperCritique=rbind(JasperCritique,frequencies)
-  }
-}
-
-JasperCritiqueFirst=spread(JasperCritique,choiceContent,number)
-JasperCritiqueFirst[is.na(JasperCritiqueFirst)]=0
-
-JasperCritiqueFirst$understanding = ifelse(JasperCritiqueFirst$`Agree with Jasper.` > 0 | JasperCritiqueFirst$`Disagree, Jasper forgot a claim.` > 0, 0, 1)
-
-write.csv(JasperCritiqueFirst,"rawData/JasperCritiqueFirstNew.csv")
-
-JasperCritiqueFirst=read.csv("rawData/JasperCritiqueFirst.csv",stringsAsFactors = FALSE)[,-1]
-
-relatedCol6=JasperCritiqueFirst
-playerListCol6=unique(relatedCol6$playerName)
-
-seventhItemScore=c()
-for(i in 1:length(playerList)){
-  temp=relatedCol6 %>% filter(playerName==playerList[i])
-  
-  if (nrow(temp)==0){
-    JasperCritiqueScore=0
-  }else{
-    sumNumber=sum(temp$`Agree with Jasper.`,temp$`Disagree, Jasper forgot a claim.`,temp$`Disagree, Jasper forgot evidence.`)
-    JasperCritiqueScore=(temp$`Disagree, Jasper forgot evidence.`/sumNumber * 1) + (sum(temp$`Agree with Jasper.`,temp$`Disagree, Jasper forgot a claim.`)/sumNumber * 0)
+# Calculate frequencies of player choices
+calculate_jasper_critique <- function(player, data) {
+  temp <- data %>% filter(playerName == player)
+  if (nrow(temp) == 0) {
+    return(NULL)
   }
   
-  playerName=playerList[i]
-  tempDataFrame=data.frame(playerName,JasperCritiqueScore)
-  seventhItemScore=rbind(seventhItemScore,tempDataFrame)
+  choices <- unique(temp$choiceContent)
+  bind_rows(lapply(choices, function(choice) {
+    number <- nrow(temp %>% filter(choiceContent == choice))
+    data.frame(playerName = player, choiceContent = choice, number = number)
+  }))
 }
+
+playerList <- unique(dialogueNodeCombineNew$playerName)
+JasperCritique <- bind_rows(lapply(playerList, calculate_jasper_critique, data = dialogueNode5FWChoiceC))
+
+# Reshape data
+JasperCritiqueFirst <- spread(JasperCritique, choiceContent, number)
+JasperCritiqueFirst[is.na(JasperCritiqueFirst)] <- 0
+
+# Add understanding metric
+JasperCritiqueFirst$understanding <- ifelse(
+  JasperCritiqueFirst$`Agree with Jasper.` > 0 | JasperCritiqueFirst$`Disagree, Jasper forgot a claim.` > 0, 0, 1
+)
+
+write.csv(JasperCritiqueFirst, "rawData/JasperCritiqueFirstNew.csv", row.names = FALSE)
+
+# Calculate the seventh item score
+relatedCol6 <- JasperCritiqueFirst
+calculate_seventh_item_score <- function(player, data) {
+  temp <- data %>% filter(playerName == player)
+  if (nrow(temp) == 0) {
+    JasperCritiqueScore <- 0
+  } else {
+    sumNumber <- sum(temp$`Agree with Jasper.`, temp$`Disagree, Jasper forgot a claim.`, temp$`Disagree, Jasper forgot evidence.`)
+    JasperCritiqueScore <- (temp$`Disagree, Jasper forgot evidence.` / sumNumber * 1) + 
+      (sum(temp$`Agree with Jasper.`, temp$`Disagree, Jasper forgot a claim.`) / sumNumber * 0)
+  }
+  data.frame(playerName = player, JasperCritiqueScore = JasperCritiqueScore)
+}
+
+seventhItemScore <- bind_rows(lapply(unique(relatedCol6$playerName), calculate_seventh_item_score, data = relatedCol6))
+
+# Save the seventh item score
+write.csv(seventhItemScore, "seventhItemScore.csv", row.names = FALSE)
 
 # 8th embedded score: 3.2 Drill to the water table
-dialogueNode8=dialogueNodeCombineNew %>% filter(dialogueID==578)
-str(dialogueNode8)
+dialogueNode8 <- dialogueNodeCombineNew %>% filter(dialogueID == 578)
+dialogueNode81 <- dialogueNodeCombineNew %>% filter(dialogueID == 579)
 
-dialogueNode81=dialogueNodeCombineNew %>% filter(dialogueID==579)
-str(dialogueNode81)
-
-relatedCol7=dialogueNode8
-relatedCol71=dialogueNode81
-
-eighthItemScore=c()
-for(i in 1:length(playerList)){
-  temp=relatedCol7 %>% filter(playerName==playerList[i]) %>% filter(dialogueNodeEventType=="DialogueNodeFinishEvent")
-  temp1=relatedCol71 %>% filter(playerName==playerList[i]) %>% filter(dialogueNodeEventType=="DialogueNodeFinishEvent")
-  if (nrow(temp)==0){
-    drillRoomScore=0
-  }else{
-    sumNumber=sum(nrow(temp),nrow(temp1))
-    drillRoomScore=(nrow(temp)/sumNumber * 1) + (nrow(temp1)/sumNumber * 0)
+# Helper function to calculate the drill room score for each player
+calculate_drill_room_score <- function(player, data578, data579) {
+  temp <- data578 %>% filter(playerName == player, dialogueNodeEventType == "DialogueNodeFinishEvent")
+  temp1 <- data579 %>% filter(playerName == player, dialogueNodeEventType == "DialogueNodeFinishEvent")
+  
+  if (nrow(temp) == 0 && nrow(temp1) == 0) {
+    drillRoomScore <- 0
+  } else {
+    sumNumber <- sum(nrow(temp), nrow(temp1))
+    drillRoomScore <- (nrow(temp) / sumNumber * 1) + (nrow(temp1) / sumNumber * 0)
   }
   
-  playerName=playerList[i]
-  tempDataFrame=data.frame(playerName,drillRoomScore)
-  eighthItemScore=rbind(eighthItemScore,tempDataFrame)
+  data.frame(playerName = player, drillRoomScore = drillRoomScore)
 }
+
+# Generate scores for all players
+eighthItemScore <- bind_rows(lapply(playerList, calculate_drill_room_score, data578 = dialogueNode8, data579 = dialogueNode81))
+
+# View the structure of the resulting score data
+str(eighthItemScore)
+
+# Save the results to a CSV file
+write.csv(eighthItemScore, "eighthItemScore.csv", row.names = FALSE)
 
 # 9th embedded score: 9.2 who flooded the warehouse
-dialogue10=c("This is a pretty serious accusation")
-inDialogue9=dialogueFreference[grep(dialogue10,dialogueFreference$content),]
+dialogue10 <- c("This is a pretty serious accusation")
+inDialogue9 <- dialogueFreference[grep(dialogue10, dialogueFreference$content), ]
 
-dialogueNode10=dialogueNodeCombineNew %>% filter(dialogueID==479)
-str(dialogueNode10)
-table(dialogueNode10$choiceID)
-dialogueNode10F=dialogueNode10 %>% filter(dialogueNodeEventType == "DialogueNodeFinishEvent")
-str(dialogueNode10F)
+# Filter dialogue node data for dialogue ID 479
+dialogueNode10 <- dialogueNodeCombineNew %>% filter(dialogueID == 479)
+dialogueNode10F <- dialogueNode10 %>% filter(dialogueNodeEventType == "DialogueNodeFinishEvent")
 
-choiceID=c(0,1,2)
-choiceContent=c("Agree, fountain caused the flooding.","Disagree, reasoning doesn't support evidence.","Disagree, Anderson using wrong evidence.")
+# Define choice IDs and corresponding content
+choiceID <- c(0, 1, 2)
+choiceContent <- c(
+  "Agree, fountain caused the flooding.",
+  "Disagree, reasoning doesn't support evidence.",
+  "Disagree, Anderson using wrong evidence."
+)
+dialogueChoice10 <- data.frame(choiceID, choiceContent)
 
-dialogueChoice10=data.frame(choiceID,choiceContent)
+# Merge dialogue node data with choice content
+dialogueNode10FWChoiceC <- left_join(dialogueNode10F, dialogueChoice10, by = "choiceID")
 
-dialogueNode10FWChoiceC=left_join(dialogueNode10F,dialogueChoice10,by="choiceID")
-
-str(dialogueNode10FWChoiceC)
-
-playerList=unique(dialogueNodeCombineNew$playerName)
-
-JasperCritique=c()
-for(i in 1:length(playerList)){
-  temp=dialogueNode10FWChoiceC %>% filter(playerName==playerList[i])
-  if(nrow(temp)==0){
-    next
-  }else{
-    choices=unique(temp$choiceContent)
-    frequencies=c()
-    for(j in 1:length(choices)){
-      temp1=temp %>% filter(choiceContent == choices[j])
-      number=nrow(temp1)
-      choiceContent=choices[j]
-      playerName=playerList[i]
-      tempDataFrame=data.frame(playerName, choiceContent, number)
-      frequencies=rbind(frequencies,tempDataFrame)
-    }
-    JasperCritique=rbind(JasperCritique,frequencies)
-  }
+# Function to calculate critique frequencies for each player
+calculate_critique_frequencies <- function(player, data) {
+  temp <- data %>% filter(playerName == player)
+  
+  if (nrow(temp) == 0) return(NULL)
+  
+  choices <- unique(temp$choiceContent)
+  
+  bind_rows(lapply(choices, function(choice) {
+    number <- nrow(temp %>% filter(choiceContent == choice))
+    data.frame(playerName = player, choiceContent = choice, number = number)
+  }))
 }
 
-andersonClaim=spread(JasperCritique,choiceContent,number)
-andersonClaim[is.na(andersonClaim)]=0
+# Generate critique frequencies for all players
+playerList <- unique(dialogueNodeCombineNew$playerName)
+JasperCritique <- bind_rows(lapply(playerList, calculate_critique_frequencies, data = dialogueNode10FWChoiceC))
 
-andersonClaim$understanding = ifelse(andersonClaim$`Agree, fountain caused the flooding.` > 0 | andersonClaim$`Disagree, reasoning doesn't support evidence.` > 0, 0, 1)
+# Reshape data for analysis
+andersonClaim <- spread(JasperCritique, choiceContent, number)
+andersonClaim[is.na(andersonClaim)] <- 0
 
-write.csv(andersonClaim,"rawData/andersonClaimNew.csv")
+# Add understanding metric
+andersonClaim$understanding <- ifelse(
+  andersonClaim$`Agree, fountain caused the flooding.` > 0 |
+    andersonClaim$`Disagree, reasoning doesn't support evidence.` > 0, 0, 1
+)
 
-andersonClaim=read.csv("rawData/andersonClaim.csv",stringsAsFactors = FALSE)[,-1]
-
-andersonClaimNew=read.csv("rawData/andersonClaimNew.csv",stringsAsFactors = FALSE)[,-1]
-
-andersonClaimCombine=rbind(andersonClaim,andersonClaimNew)
-
-write.csv(andersonClaimCombine,"rawData/andersonClaimCombine.csv")
+# Save the results to a CSV file
+write.csv(andersonClaim, "andersonClaimNew.csv", row.names = FALSE)
 
 # 10th embedded score: which fountain should be overflow
-dialogue11=c("Which fountain do you think is the best?")
-inDialogue10=dialogueFreference[grep(dialogue11,dialogueFreference$content),]
+# Extract dialogue reference containing the specific phrase
+dialogue11 <- c("Which fountain do you think is the best?")
+inDialogue10 <- dialogueFreference[grep(dialogue11, dialogueFreference$content), ]
 
-dialogueNode11=dialogueNodeCombineNew %>% filter(dialogueID==398)
-str(dialogueNode11)
-table(dialogueNode11$choiceID)
-dialogueNode11F=dialogueNode11 %>% filter(dialogueNodeEventType == "DialogueNodeFinishEvent")
-str(dialogueNode11F)
+# Filter dialogue node data for dialogue ID 398
+dialogueNode11 <- dialogueNodeCombineNew %>% filter(dialogueID == 398)
+dialogueNode11F <- dialogueNode11 %>% filter(dialogueNodeEventType == "DialogueNodeFinishEvent")
 
-choiceID=c(0,1,2,3)
-choiceContent=c("Fountain 1","Fountain 2","Fountain 3","Let me check again.")
+# Define choice IDs and corresponding content
+choiceID <- c(0, 1, 2, 3)
+choiceContent <- c("Fountain 1", "Fountain 2", "Fountain 3", "Let me check again.")
+dialogueChoice11 <- data.frame(choiceID, choiceContent)
 
-dialogueChoice11=data.frame(choiceID,choiceContent)
+# Merge dialogue node data with choice content
+dialogueNode11FWChoiceC <- left_join(dialogueNode11F, dialogueChoice11, by = "choiceID")
 
-dialogueNode11FWChoiceC=left_join(dialogueNode11F,dialogueChoice11,by="choiceID")
-
-str(dialogueNode11FWChoiceC)
-
-playerList=unique(dialogueNodeCombineNew$playerName)
-
-JasperCritique=c()
-for(i in 1:length(playerList)){
-  temp=dialogueNode11FWChoiceC %>% filter(playerName==playerList[i])
-  if(nrow(temp)==0){
-    next
-  }else{
-    choices=unique(temp$choiceContent)
-    frequencies=c()
-    for(j in 1:length(choices)){
-      temp1=temp %>% filter(choiceContent == choices[j])
-      number=nrow(temp1)
-      choiceContent=choices[j]
-      playerName=playerList[i]
-      tempDataFrame=data.frame(playerName, choiceContent, number)
-      frequencies=rbind(frequencies,tempDataFrame)
-    }
-    JasperCritique=rbind(JasperCritique,frequencies)
-  }
+# Function to calculate critique frequencies for each player
+calculate_fountain_choices <- function(player, data) {
+  temp <- data %>% filter(playerName == player)
+  
+  if (nrow(temp) == 0) return(NULL)
+  
+  choices <- unique(temp$choiceContent)
+  
+  bind_rows(lapply(choices, function(choice) {
+    number <- nrow(temp %>% filter(choiceContent == choice))
+    data.frame(playerName = player, choiceContent = choice, number = number)
+  }))
 }
 
-fountainChoose=spread(JasperCritique,choiceContent,number)
-fountainChoose[is.na(fountainChoose)]=0
+# Generate critique frequencies for all players
+playerList <- unique(dialogueNodeCombineNew$playerName)
+JasperCritique <- bind_rows(lapply(playerList, calculate_fountain_choices, data = dialogueNode11FWChoiceC))
 
-fountainChoose$understanding = ifelse(fountainChoose$`Fountain 2` > 0 | fountainChoose$`Fountain 3` > 0, 0, 1)
+# Reshape data for analysis
+fountainChoose <- spread(JasperCritique, choiceContent, number)
+fountainChoose[is.na(fountainChoose)] <- 0
 
-write.csv(fountainChoose,"rawData/fountainChooseNew.csv")
+# Add understanding metric
+fountainChoose$understanding <- ifelse(
+  fountainChoose$`Fountain 2` > 0 | fountainChoose$`Fountain 3` > 0, 0, 1
+)
 
-fountainChoose=read.csv("rawData/fountainChoose.csv",stringsAsFactors = FALSE)[,-1]
-unique(fountainChoose$playerName)
-
-fountainChooseNew=read.csv("rawData/fountainChooseNew.csv",stringsAsFactors = FALSE)[,-1]
-unique(fountainChooseNew$playerName)
-
-fountainChooseCombine=rbind(fountainChoose,fountainChooseNew)
-write.csv(fountainChooseCombine,"rawData/fountainChooseCombine.csv")
+# Save the results to a CSV file
+write.csv(fountainChoose, "fountainChooseNew.csv", row.names = FALSE)
 
 # 11th embedded score: 7.1 setup the first piece
-dialogue12=c("which one should we use")
-inDialogue11=dialogueFreference[grep(dialogue12,dialogueFreference$content),]
+# Extract dialogue reference containing the specific phrase
+dialogue12 <- c("which one should we use")
+inDialogue11 <- dialogueFreference[grep(dialogue12, dialogueFreference$content), ]
 
-dialogueNode12=dialogueNodeCombineNew %>% filter(dialogueID==467)
-str(dialogueNode12)
-table(dialogueNode12$choiceID)
-dialogueNode12F=dialogueNode12 %>% filter(dialogueNodeEventType == "DialogueNodeFinishEvent")
-str(dialogueNode12F)
+# Filter dialogue node data for dialogue ID 467
+dialogueNode12 <- dialogueNodeCombineNew %>% filter(dialogueID == 467)
+dialogueNode12F <- dialogueNode12 %>% filter(dialogueNodeEventType == "DialogueNodeFinishEvent")
 
-choiceID=c(0,1)
-choiceContent=c("The Condenser","The Evaporator")
+# Define choice IDs and corresponding content
+choiceID <- c(0, 1)
+choiceContent <- c("The Condenser", "The Evaporator")
+dialogueChoice12 <- data.frame(choiceID, choiceContent)
 
-dialogueChoice12=data.frame(choiceID,choiceContent)
+# Merge dialogue node data with choice content
+dialogueNode12FWChoiceC <- left_join(dialogueNode12F, dialogueChoice12, by = "choiceID")
 
-dialogueNode12FWChoiceC=left_join(dialogueNode12F,dialogueChoice12,by="choiceID")
-
+# Display structure of the resulting dataset
 str(dialogueNode12FWChoiceC)
 
+write.csv(dialogueNode12FWChoiceC, "dialogueNode12FWChoiceC.csv", row.names = FALSE)
+
 # 12th embedded score: 7.2 setup the second piece
-dialogue13=c("so what should this one be")
-inDialogue12=dialogueFreference[grep(dialogue13,dialogueFreference$content),]
+# Extract dialogue reference containing the specific phrase
+dialogue13 <- c("so what should this one be")
+inDialogue12 <- dialogueFreference[grep(dialogue13, dialogueFreference$content), ]
 
-dialogueNode13=dialogueNodeCombineNew %>% filter(dialogueID==469)
-str(dialogueNode13)
-table(dialogueNode13$choiceID)
-dialogueNode13F=dialogueNode13 %>% filter(dialogueNodeEventType == "DialogueNodeFinishEvent")
-str(dialogueNode13F)
+# Filter dialogue node data for dialogue ID 469
+dialogueNode13 <- dialogueNodeCombineNew %>% filter(dialogueID == 469)
+dialogueNode13F <- dialogueNode13 %>% filter(dialogueNodeEventType == "DialogueNodeFinishEvent")
 
-choiceID=c(0,1)
-choiceContent=c("The Condenser","The Evaporator")
+# Define choice IDs and corresponding content
+choiceID <- c(0, 1)
+choiceContent <- c("The Condenser", "The Evaporator")
+dialogueChoice13 <- data.frame(choiceID, choiceContent)
 
-dialogueChoice13=data.frame(choiceID,choiceContent)
+# Merge dialogue node data with choice content
+dialogueNode13FWChoiceC <- left_join(dialogueNode13F, dialogueChoice13, by = "choiceID")
 
-dialogueNode13FWChoiceC=left_join(dialogueNode13F,dialogueChoice13,by="choiceID")
-
+# Display structure of the resulting dataset
 str(dialogueNode13FWChoiceC)
 
+write.csv(dialogueNode13FWChoiceC, "dialogueNode13FWChoiceC.csv", row.names = FALSE)
+
 # 13th embedded score: 7.3 setup the third piece
-dialogue14=c("which one of these will help us")
-inDialogue13=dialogueFreference[grep(dialogue14,dialogueFreference$content),]
+# Extract dialogue reference containing the specific phrase
+dialogue14 <- c("which one of these will help us")
+inDialogue13 <- dialogueFreference[grep(dialogue14, dialogueFreference$content), ]
 
-dialogueNode14=dialogueNodeCombineNew %>% filter(dialogueID==471)
-str(dialogueNode14)
-table(dialogueNode14$choiceID)
-dialogueNode14F=dialogueNode14 %>% filter(dialogueNodeEventType == "DialogueNodeFinishEvent")
-str(dialogueNode14F)
+# Filter dialogue node data for dialogue ID 471
+dialogueNode14 <- dialogueNodeCombineNew %>% filter(dialogueID == 471)
+dialogueNode14F <- dialogueNode14 %>% filter(dialogueNodeEventType == "DialogueNodeFinishEvent")
 
-choiceID=c(0,1)
-choiceContent=c("The Condenser","The Evaporator")
+# Define choice IDs and corresponding content
+choiceID <- c(0, 1)
+choiceContent <- c("The Condenser", "The Evaporator")
+dialogueChoice14 <- data.frame(choiceID, choiceContent)
 
-dialogueChoice14=data.frame(choiceID,choiceContent)
+# Merge dialogue node data with choice content
+dialogueNode14FWChoiceC <- left_join(dialogueNode14F, dialogueChoice14, by = "choiceID")
 
-dialogueNode14FWChoiceC=left_join(dialogueNode14F,dialogueChoice14,by="choiceID")
-
+# Display structure of the resulting dataset
 str(dialogueNode14FWChoiceC)
 
+write.csv(dialogueNode14FWChoiceC, "dialogueNode14FWChoiceC.csv", row.names = FALSE)
+
 # 14th embedded score: 7.4 setup the fourth piece
-dialogue15=c("Which one do you think?")
-inDialogue14=dialogueFreference[grep(dialogue15,dialogueFreference$content),]
+# Extract dialogue reference containing the specific phrase
+dialogue15 <- c("Which one do you think?")
+inDialogue14 <- dialogueFreference[grep(dialogue15, dialogueFreference$content), ]
 
-dialogueNode15=dialogueNodeCombineNew %>% filter(dialogueID==473)
-str(dialogueNode15)
-table(dialogueNode15$choiceID)
-dialogueNode15F=dialogueNode15 %>% filter(dialogueNodeEventType == "DialogueNodeFinishEvent")
-str(dialogueNode15F)
+# Filter dialogue node data for dialogue ID 473
+dialogueNode15 <- dialogueNodeCombineNew %>% filter(dialogueID == 473)
+dialogueNode15F <- dialogueNode15 %>% filter(dialogueNodeEventType == "DialogueNodeFinishEvent")
 
-choiceID=c(0,1)
-choiceContent=c("The Condenser","The Evaporator")
+# Define choice IDs and corresponding content
+choiceID <- c(0, 1)
+choiceContent <- c("The Condenser", "The Evaporator")
+dialogueChoice15 <- data.frame(choiceID, choiceContent)
 
-dialogueChoice15=data.frame(choiceID,choiceContent)
+# Merge dialogue node data with choice content
+dialogueNode15FWChoiceC <- left_join(dialogueNode15F, dialogueChoice15, by = "choiceID")
 
-dialogueNode15FWChoiceC=left_join(dialogueNode15F,dialogueChoice15,by="choiceID")
+# Validate the structure of the resulting dataset
+str(dialogueNode15FWChoiceC)
+
+write.csv(dialogueNode15FWChoiceC, "dialogueNode15FWChoiceC.csv", row.names = FALSE)
 
 # 15th embedded score: 1.2 Deliver Sam's supplies
+dialogueNode22 <- dialogueNodeCombineNew %>% filter(dialogueID == 37)
+dialogueNode22F <- dialogueNode22 %>% filter(dialogueNodeEventType == "DialogueNodeFinishEvent")
 
-## crates condition
-dialogueNode22=dialogueNodeCombineNew %>% filter(dialogueID==37)
-str(dialogueNode22)
-table(dialogueNode22$choiceID)
-dialogueNode22F=dialogueNode22 %>% filter(dialogueNodeEventType == "DialogueNodeFinishEvent")
-str(dialogueNode22F)
+dialogueNode23 <- dialogueNodeCombineNew %>% filter(dialogueID == 38)
+dialogueNode23F <- dialogueNode23 %>% filter(dialogueNodeEventType == "DialogueNodeFinishEvent")
 
-dialogueNode23=dialogueNodeCombineNew %>% filter(dialogueID==38)
-str(dialogueNode23)
-table(dialogueNode23$choiceID)
-dialogueNode23F=dialogueNode23 %>% filter(dialogueNodeEventType == "DialogueNodeFinishEvent")
-str(dialogueNode23F)
+# Assign filtered data to related columns
+relatedCol20 <- dialogueNode22F
+relatedCol201 <- dialogueNode23F
 
-relatedCol20=dialogueNode22F
-relatedCol201=dialogueNode23F
-
-twentyOneItemScore=c()
-for(i in 1:length(playerList)){
-  temp=relatedCol20 %>% filter(playerName==playerList[i]) 
-  temp1=relatedCol201 %>% filter(playerName==playerList[i])
-  correctCount=nrow(temp)
-  wrongCount=nrow(temp1)
-  if (nrow(temp)==0){
-    crateDeliveryScore=0
-  }else{
-    sumNumber=sum(correctCount,wrongCount)
-    crateDeliveryScore=(correctCount/sumNumber * 1) + (wrongCount/sumNumber * 0)
+# Function to calculate crate delivery score for each player
+calculate_crate_delivery_score <- function(player, correct_data, wrong_data) {
+  temp <- correct_data %>% filter(playerName == player)
+  temp1 <- wrong_data %>% filter(playerName == player)
+  
+  correctCount <- nrow(temp)
+  wrongCount <- nrow(temp1)
+  
+  if (nrow(temp) == 0 && nrow(temp1) == 0) {
+    crateDeliveryScore <- 0
+  } else {
+    sumNumber <- sum(correctCount, wrongCount)
+    crateDeliveryScore <- (correctCount / sumNumber * 1) + (wrongCount / sumNumber * 0)
   }
   
-  playerName=playerList[i]
-  tempDataFrame=data.frame(playerName,crateDeliveryScore)
-  twentyOneItemScore=rbind(twentyOneItemScore,tempDataFrame)
+  data.frame(playerName = player, crateDeliveryScore = crateDeliveryScore)
 }
+
+# Generate crate delivery scores for all players
+twentyOneItemScore <- bind_rows(lapply(playerList, calculate_crate_delivery_score, 
+                                       correct_data = relatedCol20, wrong_data = relatedCol201))
+
+# View structure of the resulting data
+str(twentyOneItemScore)
+
+# Save the results to a CSV file
+write.csv(twentyOneItemScore, "twentyOneItemScore.csv", row.names = FALSE)
 
 # 16th embedded score: 7.1 install 4 pumps downstream of super tree
-## seeds planting
-unique(dialogueCombine$dialogueID)
+# Filter dialogue node data for dialogue IDs 447, 448, 449, and 450
+dialogueNode24 <- dialogueNodeCombineNew %>% filter(dialogueID == 447)
+dialogueNode24F <- dialogueNode24 %>% filter(dialogueNodeEventType == "DialogueNodeFinishEvent")
 
-dialogueNode24=dialogueNodeCombineNew %>% filter(dialogueID==447)
-str(dialogueNode24)
-dialogueNode24F=dialogueNode24 %>% filter(dialogueNodeEventType == "DialogueNodeFinishEvent")
-str(dialogueNode24F)
+dialogueNode25 <- dialogueNodeCombineNew %>% filter(dialogueID == 448)
+dialogueNode25F <- dialogueNode25 %>% filter(dialogueNodeEventType == "DialogueNodeFinishEvent")
 
-dialogueNode25=dialogueNodeCombineNew %>% filter(dialogueID==448)
-str(dialogueNode25)
-dialogueNode25F=dialogueNode25 %>% filter(dialogueNodeEventType == "DialogueNodeFinishEvent")
-str(dialogueNode25F)
+dialogueNode26 <- dialogueNodeCombineNew %>% filter(dialogueID == 449)
+dialogueNode26F <- dialogueNode26 %>% filter(dialogueNodeEventType == "DialogueNodeFinishEvent")
 
-dialogueNode26=dialogueNodeCombineNew %>% filter(dialogueID==449)
-str(dialogueNode26)
-dialogueNode26F=dialogueNode26 %>% filter(dialogueNodeEventType == "DialogueNodeFinishEvent")
-str(dialogueNode26F)
+dialogueNode27 <- dialogueNodeCombineNew %>% filter(dialogueID == 450)
+dialogueNode27F <- dialogueNode27 %>% filter(dialogueNodeEventType == "DialogueNodeFinishEvent")
 
-dialogueNode27=dialogueNodeCombineNew %>% filter(dialogueID==450)
-str(dialogueNode27)
-dialogueNode27F=dialogueNode27 %>% filter(dialogueNodeEventType == "DialogueNodeFinishEvent")
-str(dialogueNode27F)
+# Assign filtered data to related columns
+relatedCol21 <- dialogueNode24F
+relatedCol211 <- dialogueNode25F
+relatedCol212 <- dialogueNode26F
+relatedCol213 <- dialogueNode27F
 
-relatedCol21=dialogueNode24F
-relatedCol211=dialogueNode25F
-relatedCol212=dialogueNode26F
-relatedCol213=dialogueNode27F
-
-twentyTwoItemScore=c()
-for(i in 1:length(playerList)){
-  temp=relatedCol21 %>% filter(playerName==playerList[i]) 
-  temp1=relatedCol211 %>% filter(playerName==playerList[i])
-  temp2=relatedCol212 %>% filter(playerName==playerList[i])
-  temp3=relatedCol213 %>% filter(playerName==playerList[i])
-  correctCount=nrow(temp)
-  wrongCount=sum(nrow(temp1),nrow(temp2),nrow(temp3))
-  if (nrow(temp)==0){
-    plantScore=0
-  }else{
-    sumNumber=sum(correctCount,wrongCount)
-    plantScore=(correctCount/sumNumber * 1) + (wrongCount/sumNumber * (-0.5))
+# Function to calculate plant score for each player
+calculate_plant_score <- function(player, correct_data, wrong_data_list) {
+  temp <- correct_data %>% filter(playerName == player)
+  wrongCounts <- sapply(wrong_data_list, function(data) nrow(data %>% filter(playerName == player)))
+  
+  correctCount <- nrow(temp)
+  wrongCount <- sum(wrongCounts)
+  
+  if (nrow(temp) == 0 && wrongCount == 0) {
+    plantScore <- 0
+  } else {
+    sumNumber <- sum(correctCount, wrongCount)
+    plantScore <- (correctCount / sumNumber * 1) + (wrongCount / sumNumber * -0.5)
   }
   
-  playerName=playerList[i]
-  tempDataFrame=data.frame(playerName,plantScore)
-  twentyTwoItemScore=rbind(twentyTwoItemScore,tempDataFrame)
+  data.frame(playerName = player, plantScore = plantScore)
 }
+
+# Generate plant scores for all players
+wrong_data_list <- list(relatedCol211, relatedCol212, relatedCol213)
+twentyTwoItemScore <- bind_rows(lapply(playerList, calculate_plant_score, 
+                                       correct_data = relatedCol21, 
+                                       wrong_data_list = wrong_data_list))
+
+# View the structure of the resulting data
+str(twentyTwoItemScore)
+
+# Save the results to a CSV file
+write.csv(twentyTwoItemScore, "twentyTwoItemScore.csv", row.names = FALSE)
 
 # 17th embedded score: 1.1 find the team
-FTTwoTaskEvent=filedTestTwoNew %>% filter(type=="TaskEvent")
-str(FTTwoTaskEvent)
-taskDetail=c()
-for(i in 1:nrow(FTTwoTaskEvent)){
-  temp=mhsEventDetailsById(conn,FTTwoTaskEvent$ItemID[i])
-  taskDetail=rbind.fill(taskDetail,temp)
-}
-str(taskDetail)
-taskCombine=data.frame(FTTwoTaskEvent,taskDetail)
-str(taskCombine)
-write.csv(taskCombine,"rawData/taskCombine.csv")
+# Filter "TaskEvent" data and extract details
+FTTwoTaskEvent <- filedTestTwoNew %>% filter(type == "TaskEvent")
+taskDetail <- bind_rows(lapply(1:nrow(FTTwoTaskEvent), function(i) {
+  temp <- mhsEventDetailsById(conn, FTTwoTaskEvent$ItemID[i])
+  temp
+}))
 
-taskCombine=read.csv("rawData/taskCombine.csv",stringsAsFactors = FALSE)[,-1]
-str(taskCombine)
-unique(taskCombine$playerName)
-unique(taskCombine$taskKey)
+# Combine task data
+taskCombine <- data.frame(FTTwoTaskEvent, taskDetail)
+write.csv(taskCombine, "rawData/taskCombine.csv", row.names = FALSE)
 
-findTeamtask=taskCombine %>% filter(questID==20) %>% filter(taskKey=="Find the team")
-unique(findTeamtask$taskKey)
+# Load combined task data
+taskCombine <- read.csv("rawData/taskCombine.csv", stringsAsFactors = FALSE)[, -1]
 
-playerList=unique(findTeamtask$playerName)
+# Filter "Find the team" task data
+findTeamtask <- taskCombine %>% filter(questID == 20, taskKey == "Find the team")
+playerList <- unique(findTeamtask$playerName)
 
-findTeamTimeDuration=c()
-for(i in 1:length(playerList)){
-  temp=findTeamtask %>% filter(playerName==playerList[i])
-  taskCompleteList=temp %>% filter(taskEventType=="TaskCompleteEvent")
-  taskCompleteListO=taskCompleteList[order(taskCompleteList$timestamp),]
-  if(nrow(taskCompleteListO)==0){
-    next
-  }else{
-    timeDurations=c()
-    for(j in 1:nrow(taskCompleteListO)){
-      endTime=taskCompleteListO$timestamp[j]
-      temp1=temp %>% filter(timestamp<endTime) %>% filter(taskEventType=="TaskActiveEvent")
-      if(nrow(temp1)==0){
-        next
-      }else{
-        temp2=temp1[order(temp1$timestamp),]
-        startTime=temp2$timestamp[nrow(temp2)]
-        timeDuration=difftime(endTime,startTime)
-        units(timeDuration)="mins"
-        timeDuration1=round(timeDuration,3)
-        tempDataFrame=data.frame(startTime,endTime,timeDuration1)
-        timeDurations=rbind(timeDurations,tempDataFrame)
-      }
-      
-    }
-    if(is.null(timeDurations)){
-      next
-    }else{
-      playerName=playerList[i]
-      tempDataFrame1=data.frame(playerName,timeDurations)
-      findTeamTimeDuration=rbind(findTeamTimeDuration,tempDataFrame1)
-    }
-  }
-}
+# Calculate time duration for "Find the Team" task
+findTeamTimeDuration <- bind_rows(lapply(playerList, function(player) {
+  temp <- findTeamtask %>% filter(playerName == player)
+  taskCompleteList <- temp %>% filter(taskEventType == "TaskCompleteEvent") %>% arrange(timestamp)
+  
+  if (nrow(taskCompleteList) == 0) return(NULL)
+  
+  bind_rows(lapply(1:nrow(taskCompleteList), function(j) {
+    endTime <- taskCompleteList$timestamp[j]
+    temp1 <- temp %>% filter(timestamp < endTime, taskEventType == "TaskActiveEvent") %>% arrange(timestamp)
+    
+    if (nrow(temp1) == 0) return(NULL)
+    
+    startTime <- tail(temp1$timestamp, 1)
+    timeDuration <- round(difftime(endTime, startTime, units = "mins"), 3)
+    data.frame(playerName = player, startTime = startTime, endTime = endTime, timeDuration = timeDuration)
+  }))
+}))
 
-## hotKey detail
-hotKeyEvents=filedTestTwo %>% filter(type=="HotkeyEvent")
-str(hotKeyEvents)
+# Load "HotkeyEvent" data and extract details
+hotKeyEvents <- filedTestTwo %>% filter(type == "HotkeyEvent")
+hotKeyDetail <- bind_rows(lapply(1:nrow(hotKeyEvents), function(i) {
+  temp <- mhsEventDetailsById(conn, hotKeyEvents$ItemID[i])
+  temp
+}))
 
-hotKeyDetail=c()
-for(i in 1:nrow(hotKeyEvents)){
-  temp=mhsEventDetailsById(conn, hotKeyEvents$ItemID[i])
-  hotKeyDetail=rbind.fill(hotKeyDetail,temp)
-}
+# Combine hotkey data
+hotKeyCombine <- cbind(hotKeyEvents, hotKeyDetail)
+write.csv(hotKeyCombine, "rawData/hotKeyCombine.csv", row.names = FALSE)
 
-hotKeyCombine=cbind(hotKeyEvents,hotKeyDetail)
+# Load combined hotkey data and convert timestamps
+hotKeyCombineNew <- read.csv("rawData/hotKeyCombine.csv", stringsAsFactors = FALSE)[, -1]
+hotKeyCombineNew$timestamp <- ymd_hms(hotKeyCombineNew$timestamp)
 
-write.csv(hotKeyCombine,"hotKeyCombine.csv")
-str(hotKeyCombine)
+# Calculate map usage during "Find the Team" task
+mapUseStatus <- bind_rows(lapply(playerList, function(player) {
+  temp <- hotKeyCombineNew %>% filter(playerName == player)
+  temp1 <- findTeamTimeDuration %>% filter(playerName == player)
+  
+  bind_rows(lapply(1:nrow(temp1), function(j) {
+    startTime <- ymd_hms(temp1$startTime[j])
+    endTime <- ymd_hms(temp1$endTime[j])
+    mapCount <- nrow(temp %>% filter(timestamp >= startTime, timestamp <= endTime, keyName == "M"))
+    data.frame(playerName = player, playTime = j, mapCount = mapCount)
+  }))
+}))
 
-hotKeyCombineNew=read.csv("hotKeyCombine.csv",stringsAsFactors = FALSE)[,-1]
+# Combine "Find the Team" time duration and map usage
+findTheTeamStatus <- left_join(findTeamTimeDuration, mapUseStatus, by = c("playerName", "playTime"))
+write.csv(findTheTeamStatus, "rawData/findTheTeamStatusNew.csv", row.names = FALSE)
 
-playerList=unique(findTeamTimeDuration$playerName)
-hotKeyCombineNew$timestamp=ymd_hms(hotKeyCombineNew$timestamp)
+# Calculate scores for each playthrough
+twentyThreeItemScore <- bind_rows(lapply(playerList, function(player) {
+  temp <- findTheTeamStatus %>% filter(playerName == player)
+  
+  bind_rows(lapply(1:nrow(temp), function(j) {
+    timeScore <- ifelse(temp$timeDuration[j] < 3, 1, 0)
+    mapScore <- ifelse(temp$mapCount[j] > 0, 0.5, 0)
+    sumScore <- timeScore + mapScore
+    data.frame(playerName = player, playTime = j, sumScore = sumScore)
+  }))
+}))
 
-mapUseStatus=c()
-for(i in 1:length(playerList)){
-  temp = hotKeyCombineNew %>% filter(playerName==playerList[i])
-  temp1= findTeamTimeDuration %>% filter(playerName==playerList[i])
-  mapPerTime=c()
-  for(j in 1:nrow(temp1)){
-    EndTime=ymd_hms(temp1[j,]$endTime) 
-    StartTime=ymd_hms(temp1[j,]$startTime)
-    temp2=temp %>% filter(timestamp>=StartTime) %>% filter(timestamp<=EndTime)
-    mapCount=nrow(temp2 %>% filter(keyName=="M"))
-    timeFreq=j
-    tempDataFrame=data.frame(timeFreq,mapCount)
-    mapPerTime=rbind(mapPerTime,tempDataFrame)
-  }
-  playerName=playerList[i]
-  tempDataFrame1=data.frame(playerName,mapPerTime)
-  mapUseStatus=rbind(mapUseStatus,tempDataFrame1)
-} 
+write.csv(twentyThreeItemScore, "rawData/findTheTeamScoreNew.csv", row.names = FALSE)
 
-str(mapUseStatus)
+# Calculate average score for each player
+findTheTeamScoreAverage <- bind_rows(lapply(playerList, function(player) {
+  temp <- twentyThreeItemScore %>% filter(playerName == player)
+  findTeamAveScore <- mean(temp$sumScore, na.rm = TRUE)
+  data.frame(playerName = player, findTeamAveScore = findTeamAveScore)
+}))
 
-findTheTeamStatus=cbind(findTeamTimeDuration,mapUseStatus)
-findTheTeamStatus1=findTheTeamStatus[,c(1,4,7)]
-write.csv(findTheTeamStatus1,"findTheTeamStatusNew.csv")
-
-twentyThreeItemScore=c()
-for(i in 1:length(playerList)){
-  temp=findTheTeamStatus1 %>% filter(playerName==playerList[i])
-  scoreCombine=c()
-  for(j in 1:nrow(temp)){
-    temp1=temp[j,]
-    if(temp1$timeDuration1 <3){
-      timeScore=1
-    }else{
-      timeScore=0
-    }
-    if(temp1$mapCount>0){
-      mapScore=0.5
-    }else{
-      mapScore=0
-    }
-    sumScore=sum(timeScore,mapScore)
-    playTime=j
-    tempDaraFrame=data.frame(playTime,sumScore)
-    scoreCombine=rbind(scoreCombine,tempDaraFrame)
-  }
-  playerName=playerList[i]
-  tempDaraframe2=data.frame(playerName,scoreCombine)
-  twentyThreeItemScore=rbind(twentyThreeItemScore,tempDaraframe2)
-}
-write.csv(twentyThreeItemScore,"findTheTeamScoreNew.csv")
-
-findTheTeamScoreAverage=c()
-for(i in 1:length(playerList)){
-  temp=twentyThreeItemScore %>% filter(playerName==playerList[i])
-  scoreSum=sum(temp$sumScore)
-  findTeamAveScore=scoreSum/nrow(temp)
-  playerName=playerList[i]
-  tempDataFrame=data.frame(playerName,findTeamAveScore)
-  findTheTeamScoreAverage=rbind(findTheTeamScoreAverage,tempDataFrame)
-}
-
-
-
-
-
+# View and save the average scores
+write.csv(findTheTeamScoreAverage, "findTheTeamScoreAverage.csv", row.names = FALSE)
