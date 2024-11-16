@@ -44,6 +44,8 @@ explorationSizesS = explorationSizes %>%
 
 colnames(explorationSizesS)[1] = "playerName"
 
+write.csv(MapSizeShare,'observableFeatures/MapSize.csv', row.names = FALSE)
+
 # Map exploration share
 calculate_interaction_share <- function(data){
   
