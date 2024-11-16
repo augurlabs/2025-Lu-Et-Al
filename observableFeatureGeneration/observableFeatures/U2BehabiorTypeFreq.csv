@@ -1,10 +1,10 @@
-"playerName","BType.ArgumentInteraction.Freq","BType.DialogueEvent.Freq","BType.HotkeyEvent.Freq","BType.MovementEvent.Freq","BType.TaskCompletion.Freq","BType.ToolInteraction.Freq","BType.TriggerEvent.Freq"
-"JG1 UX1",67,254,16,161,76,31,143
-"JG2 UX2",125,266,16,1098,82,41,155
-"JG3 UX3",48,264,20,5143,79,39,147
-"JG4 UX4",59,226,20,2982,67,41,135
-"JG5 UX5",148,234,7,572,67,15,132
-"JG6 UX6",115,254,13,705,76,29,139
-"JG7 UX7",100,266,22,468,76,50,142
-"JG8 UX8",123,299,22,3543,81,41,164
-"JG9 UX9",62,288,4,3737,86,9,187
+playerName,BType.ArgumentInteraction.Freq,BType.DialogueEvent.Freq,BType.HotkeyEvent.Freq,BType.MovementEvent.Freq,BType.TaskCompletion.Freq,BType.ToolInteraction.Freq,BType.TriggerEvent.Freq
+1,67,254,16,161,76,31,143
+2,125,266,16,1098,82,41,155
+3,48,264,20,5143,79,39,147
+4,59,226,20,2982,67,41,135
+5,148,234,7,572,67,15,132
+6,115,254,13,705,76,29,139
+7,100,266,22,468,76,50,142
+8,123,299,22,3543,81,41,164
+9,62,288,4,3737,86,9,187
