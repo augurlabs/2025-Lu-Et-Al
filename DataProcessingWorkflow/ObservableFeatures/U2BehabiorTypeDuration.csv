@@ -1,0 +1,10 @@
+playerName,ArgumentInteraction,DialogueEvent,HotkeyEvent,MovementEvent,TaskCompletion,ToolInteraction,TriggerEvent
+1,117,482,0,245,0,0,43
+2,136,518,0,377,0,20,46
+3,61,570,0,480,0,0,45
+4,143,462,0,453,0,0,23
+5,298,478,0,462,0,3,541
+6,186,566,4,350,0,11,38
+7,149,706,0,338,0,31,22
+8,158,591,0,325,0,47,148
+9,70,413,0,416,0,8,47
